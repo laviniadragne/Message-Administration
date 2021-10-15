@@ -1,0 +1,152 @@
+Nume: Dragne Lavinia-Stefana
+Grupa: 324 CA
+
+				PROTOCOALE DE COMUNICATIE
+				      - Tema #2 - 
+			 Aplicatie client-server TCP si UDP pentru
+				  gestionarea mesajelor
+
+
+	Continutul proiectului este urmatorul:
+	
+	- helpers.h, functions.h	
+
+	- server.cpp, subscriber.cpp, functions.cpp
+	
+	- Makefile 
+
+	- acest fisier README.
+
+	Descrierea solutiei:
+	
+	* Am pornit de la implementarile folosite in laboratoarele 7 si 8, pe care le-am extins pentru
+a permite un numar multiplu de conexiuni si pentru a rula clientul intr-un mod diferit, id-ul facand
+parte din comanda primita la stdin, acum.
+	
+	Structuri folosite:
+
+	Pentru a eficientiza timpul de raspuns al serverului la cererile, de mesaje, am ales
+	sa folosesc urmatoarele structuri de date:
+	
+	-> o structura denumita client, in care sunt retinute: id-ul, un dictionar cu topicurile
+	la care este abonat, pe baza numelui topicului ca si key, o coada de mesaje ce urmeaza sa
+	le primeasca, daca revine online, socket-ul, de pe care s-a conectat si statusul curent
+        (conectat sau deconectat);
+	-> o structura de mesaj primit de la clientul udp, care contine topicul, type-ul mesajului
+	si valoarea efectiva;
+	-> o structura de mesaj primit de la clientul tcp, care contine type-ul mesajului, 
+	topicul la care se aboneaza si sf-ul aferent;
+	-> o structura de mesaj trimis de server catre clientul tcp, care contine id-ul si portul
+ 	clientului udp, care a furnizat informatia, cat si topicul, type-ul mesajului si payload-ul
+	in sine;
+	-> un map de clienti, ce primeste ca si cheie un string, reprezentand id-ul unui client si
+	intoarce structura, cu informatiile referitoare la clientul respectiv;
+	-> un map de sockets, ce primeste ca si cheie un numar de socket si intoarce clientul 
+	corespunzator, conectat pe acel socket;
+	-> un map de topics, care pe baza numelui topicului, intoarce lista de clienti, abonati la
+ 	acel topic;
+	
+	
+	Implementare subscriber:
+
+	* Verific numarul de argumente primite de la tastatura si in caz de eroare, afisez un mesaj
+corespunzator.
+	* Memorez si verific daca s-au primit corect datele despre id-ul clientului, ip-ul serverului
+si portul acestuia.
+	* Creez un nou socket si completez campurile structurii de tip sockaddr_in cu datele primite,
+ulterior conectandu-ma la portul si ip-ul serverului. Trimit serverului id-ul clientului.
+	* Se dezactiveaza algoritmul lui Neagle, pentru a obtine o comunicatie cu latenta scazuta si
+se sterg toti file descriptorii existenti din set, adaugandu-se ulterior socket-ul curent si STDIN-ul,
+in multimea de read_fds. 
+	* Daca se citesc date de la tastatura, se verifica daca acestea sunt, sau nu, o comanda de
+"exit" si in caz afirmativ, se trimite un mesaj gol catre server, pentru a-l anunta de inchiderea
+conexiunii. Se parseaza mesajul citit, folosind functia sscanf si in caz de eroare se intoarce un
+mesaj specific. Topicul, type-ul mesajului si sf-ul (transformat cu ajutorul functiei atoi in int)
+sunt retinute intr-o structura de tip msg_tcp_to_server si trimise la server. In cazul in care type-ul
+este de subscribe sau unsubscribe, se afiseaza pe ecran un mesaj specific.
+	* Daca se primesc date de la server, se verifica daca mesajul nu este gol, indicator pentru
+inchiderea conexiunii si in caz afirmativ se goleste setul de file descriptori si se elibereaza 
+memoria. In caz contrar, se aloca o structura de tip msg_server_to_tcp, pentru care se verifica tipul
+de date primit ca si int, folosind functia convert_data_type si se afiseaza string-ul caracteristic.
+
+	Implementare server:
+
+	* Se golesc multimile de file descriptori si se deschide 2 socketi pentru comunicarea cu 
+clientul tcp si udp. Se completeaza datele din structura sockaddr_in pentru clienti, folosind functia
+complete_struct_addr si se adauga file destriptorii in set. 
+	* Se verifica daca este un mesaj primit de la tastatura si daca este comanda exit. In caz
+afirmativ se trimite, folosind functia send_exit_msg, un mesaj gol catre clienti pentru a inchide
+conexiunea.
+
+	* Daca este un mesaj primit de la clientul udp:
+
+		-> Se aloca si se retine acesta intr-o structura de tip msg_from_udp. Se copiaza din
+buffer-ul primit camp cu camp in structura, folosindu-se functia complete_msg_from_udp.
+		-> Se aloca o structura de tip msg_server_to_tcp si se completeaza campurile
+acesteia, facandu-se conversiile corespunzatoare, pentru type-ul mesajului primit de la udp, in
+functia complete_val_msg. 
+		-> Se cauta in map-ul de topicuri, topicul primit de la udp si in cazul in care
+acesta nu exista i se asociaza o lista goala de clienti abonati. Daca topicul se regaseste in
+map se trimite mesajul catre clientii tcp, cu ajutorul functiei manage_msg_from_udp. 
+		-> Aceasta parcurge listele de clienti abonati la acel topic si celor care sunt
+online le trimite mesajul. Celor care sunt offline si au sf-ul = 1 pentru acel topic, le adauga
+mesajul de la udp intr-o coada, specifica fiecarui client. 
+	* Daca este un mesaj de la clientul tcp:
+		-> Se adauga socket-ul intors de apelul functiei accept in multimea de file
+descriptori.
+		-> Se cauta id-ul clientului primit in map-ul de clients si in cazul in care se
+gaseste si are deja statusul online se afiseaza un mesaj caracteristic.
+		-> Daca era offline si acum se reconecteaza, se schimba statusul, se actualizeaza 
+socket-ul corespunzator, din structura client si din map-ul de sockets si i se trimit mesajele din
+coada de offline messages, folosind functia send_msg_from_queue. 
+		-> Daca acesta nu se afla in map-ul de clients este adaugat atat in el, cat si
+in map-ul de sockets, afisandu-se un mesaj corespunzator pe ecran.
+
+	* Daca se primesc date de la unul dintre clientii tcp:
+
+		-> Pe baza socket-ului, se gaseste, in map, clientul ce vrea sa comunice cu serverul.
+Daca mesajul primit este unul gol, inseamna ca conexiunea s-a inchis si trebuie afisat un mesaj 
+coresounzator si scos socketul inchis din multimea de file descriptori.
+		-> Daca mesajul continea date, se stocheaza intr-o structura de tip msg_tcp_to_server,
+copiindu-se din buffer, camp cu camp, cu ajutorul functiei memcpy. 
+		-> Daca clientul se aboneaza la topic, acesta este adaugat in map-ul de topics,
+daca nu exista, si topicul in map-ul de subscriptions, corespunzator structurii client. Daca topic-ul
+exista, trebuie doar sa ii fie actualizat sf-ul.
+		-> Daca clientul se dezaboneaza, se verifica daca era abonat la acel topic si in caz
+contrar, se afiseaza un mesaj corespunzator. Daca era abonat, se sterge topic-ul din map-ul de
+subscriptions si clientul din map-ul de topics cu ajutorul functiei erase_subscriptions.
+
+	Protocol folosit:
+	Am folosit, pentru trimiterea datelor de la clientul tcp la server, o structura de date
+denumita msg_tcp_to_server, cu campurile type, topic si sf. Serverul trimite catre clientii tcp
+un mesaj, intr-o structura denumita msg_server_to_tcp si primeste mesaje de la clientii udp,
+folosindu-se de structura msg_from_udp. De asemenea, clientul tcp trimite catre server intai id-ul,
+ulterior datele. Un mesaj cu un continut gol va semnifica ca se doreste inchiderea conexiunii.
+
+
+	-> Probleme intampinate
+	1. Dificultate in a face debug, uneori manual testele treceau dar pe checker nu, din cauza
+	unor lacune in enunt, precum lipsa precizarii ierarhiei de directoare folosite pentru a
+	rula clientul udp si checker-ul. Am rezolvat problema citind intrebarile si raspunsurile
+	de pe forum.
+	2. Poate ca era utila si o rubrica pentru a incarca pe vmchecker, asa stiam sigur daca tema
+	se comporta corespunzator pe un mediu arbitrar.
+	
+	-> Referinte
+	1. Laboratoarele de PC 6, 7 si 8 (laboratorul 8 este folosit ca si schelet atat pentru
+	   implementare, cat si pentru Makefile).
+	
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
